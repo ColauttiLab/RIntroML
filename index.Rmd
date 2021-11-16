@@ -1,0 +1,172 @@
+---
+title: "Introduction to Machine Learning"
+output: html_document
+---
+
+# Setup
+
+These tutorials provide an introduction to Machine Learning in R. Before continuing, you should be familiar with the [R Crash Course Tutorials](https://colauttilab.github.io/RCrashCourse/1_fundamentals.html). Also be sure to review the introduction to 'big data' [Data Science Tutorial](https://colauttilab.github.io/RCrashCourse/5_datascience.html).
+
+
+and the Introductory Statistics in R Tutorials. These are listed below.
+
+  * [Population and Sample Distributions](https://colauttilab.github.io/RIntroStats/1_Distributions.html)
+  * [Central Moments](https://colauttilab.github.io/RIntroStats/2_Moments.html)
+  * [Linear Models](https://colauttilab.github.io/RIntroStats/3_LinearModels.html)
+  * [Advanced Linear Models](https://colauttilab.github.io/RIntroStats/4_AdvancedLM.html)
+  * [Model Selection](https://colauttilab.github.io/RIntroStats/5_ModelSelection.html)
+  * [Generalized Linear Models](https://colauttilab.github.io/RIntroStats/6_GeneralizedLM.html)
+  * [Experimental Design](https://colauttilab.github.io/RIntroStats/7_ExperimentalDesign.html)
+  * [Linear Mixed Models](https://colauttilab.github.io/RIntroStats/8_MixedModels.html)
+  * [Generalized Additive Models](https://colauttilab.github.io/RIntroStats/9_GAM.html)
+  
+All of these statistical tools use a common theme, namely we have:
+
+  * One predictor variable
+  * One or more response variables
+  
+# Generative Models
+
+Statistical linear models come in many forms (LM, GLM, LME, GAM, GAMM) but all tend to focus on parameter estimation as a form of hypothesis testing. These are sometimes called **Generative Models** because they predictions be easily reproduced.
+
+The slopes, means and intercepts in our models have biological meaning. We can test the fit of the models to test alternative hypotheses. We may test a null hypothesis using a p-value or we may test many different hypotheses using model selection.
+
+We can use our models to make predictions about the value of a response variable given a set of predictors. We saw how to do this using the `predict()` function, but this is not usually what linear models are used for. 
+
+One limitation of these models is the assumption about the distribution of residuals, which follow a defined distribution (e.g. Gaussian, Poisson, Binomial).
+
+Most of the fundamentals of linear models were developed long before the availability of computers with significant processing power. As a result, they tend to perform well when data are sparse. The rapid development of computing power and the rapid collection of 'big data' led to new 'machine learning' approaches.
+
+# Machine Learning
+
+Machine Learning is a broad term that applies to a very wide range of methods from simple linear regression to complex artificial intelligence agents. Generally, a ML model is one that uses computation to optimize a model and draw inferences from data. Machine Learning is a very broad area of research and application, a small fraction of which includes Artificial Intelligence (AI). In general, the more complex the ML model, the more observations are needed to build a robust model. In these tutorials we introduce a few of the more useful ML models for intermediate to large datasets. 
+
+## Discriminative Models
+
+In contrast to **generative models** that emphasize parameters over prediction, ML tends to focus on **discriminative models** that emphasize prediction over parameter estimation. Because of this change in emphasis, there tend to be fewer assumptions about the underlying distributions of the input data. Models that makes no assumptions about the underlying population distribution are called **distribution free** models.
+
+## Supervised vs Unsupervised
+
+ML models are often grouped into these two categories. The difference is related to the prediction, which is usually a grouping variable. For example, we might want to train a ML model that can predict which patients will get cancer, or which species communities have been exposed to contaminants.
+
+A model is **supervised** when the grouping response variable is used to train the model. This is the most common type of ML model. Some common examples include logistic regression, discriminant analysis, support vector machines, and regression trees.
+
+A model is **unsupervised** when there is no grouping variable. Principal components analysis and unsupervised clustering algorithms are good examples of this. With unsupervised models we are looking for structure in the data but don't have *a priori* predictions about groups.
+
+# Prediction and Interpretability
+
+Prediction and Interpretability are two key aspects of Machine Learning models. **Prediction** you should understand quite well by now -- it's the ability to predict a response variable given a set of predictor variables. **Interpretability** is the ability to interpret the model. All of the linear/additive models listed in the tutorials above are *interpretable* because we (the human) can take the input values of the predictor variable, and calculate a response value using a linear combination of estimates. In other words, if our model is:
+
+$$ Y \sim \beta_0 + \beta_1X_1 + \beta_2X_2$$
+
+Then we can calculate our estimate of $Y$ by multiplying $\beta_1$ times variable $X_1$ and $\beta_2$ times $X_2$ and then adding them together.
+
+Some machine models are also interpretable in this way, but many of the more complicated models are NOT! Non-interpretable ML models are the proverbial 'black box': numbers go in and predictions come out but nobody really understands how the predictions are made -- the calculations are too complex to interpret in any meaningful way.
+
+Some of the more advanced neural networks that are popularized by major tech companies (e.g. Apple, Google, Facebook), and this can cause some very big problems including unintentionally [racist and sexist algorithms](https://www.nature.com/articles/d41586-018-05707-8). This raises a key limitation of ML models -- they are only as good as the data that train them. 
+
+# Confusion Matrix
+
+Supervised ML models focus on prediction, and most often the predictions are categorical. For example, we may want to train a model where we input a .jpeg image and output whether it is a Chihuahua, or not.
+
+It's not as easy as you might think...
+
+![Chihuahua or Muffin?](https://colauttilab.github.io/Files/ChihuahuaORmuffin.jpeg)
+
+The confusion matrix is a simple table that compares the predicted to the observed as a way of testing the accuracy of the model:
+
+-|Chihuaha Predicted | Muffin Predicted
+-----------| ----------- | -----------
+Actual Chihuahua | 40 | 10
+Actual Muffin | 20 | 30
+
+> From this matrix, you should now be able to calculate:
+
+  * Model Accuracy
+  * Model Sensitivity
+  * Model Specificity
+  
+Review the [Advanced ML Tutorial](https://colauttilab.github.io/RIntroStats/4_AdvancedLM.html#Model_Accuracy)  if you need a refresher on this.
+
+# Overfitting
+
+Overfitting occurs when a model is really good at predicting the specific data used to generate the model, but then performs poorly when predicting new data. In the [Model Selection Tutorial](https://colauttilab.github.io/RIntroStats/5_ModelSelection.html) we covered LRT and AIC, and we saw how these approaches penalize the model based on  the number of predictors. The use of d.f. in the LRT and the $k$ parameters in the information criteria penalize the fit of the models based on the number of predictors. This is one way to prevent over-fitting
+
+## Data Splitting
+
+When we use ML models to make predictions, we usually want to make broader predictions about a population. In the ideal scenario we would collect data, make or 'train' the model, then collect new data to test the model.
+
+If we can't run two separate experiments, then we can try to simulate this by splitting the data into a **Training Dataset** and a **Validation Dataset**. We use the trainig dataset to make the model and the validation dataset to test the model.
+
+Therefore, we want to make sure we have an even representation of different groups in each dataset, so we might typically divide even vs odd rows of our data, or every third row if we need a larger sample size for our training dataset.
+
+## Cross-Validation
+
+Cross-validation is a computational method related to data splitting, except that we start with the entire dataset, then:
+
+  1. remove one or more observations ($n$)
+  2. train the model on the remaining data
+  3. put the data back in and remove the next $n$ data point(s)
+  4. repeat for the entire dataset
+  5. average the models
+  
+In the special case where $n = 1$, we call this **Leave-one-out cross-validation** or **LOOCV** for short. 
+
+**k-fold** cross-validation is the term commonly used in the machine-learning lingo. However, don't get confused with our use of $k$ for the number of predictors. K-fold CV refers to the number of number of groups of rows. For example, $k=2$ splits the data in half, $k=3$ splits into thirds, etc. When $k=n$ we are doing a LOOCV.
+
+# Too Many Predictors
+
+Although there are exceptions, we generally want the number of predictors to be much less than the number of observations. But many biological datasets are the opposite. For example:
+
+  * Gene expression for thousands of transcripts measured in a few dozen individuals
+  * Surveys of hundreds of species from a few dozen locations
+  * Thousands of environmental records from a few hundred locations
+
+Even when we have more observations than predictors, our models will perform better if we choose a few of the 'best' predictors rather than throwing everything into the model.
+
+There are many ways to do this. The best approaches are guided by a good biological understanding of the system, which might allow you to select a few 'key' predictors. You may also combine your knowledge of the system with a couple of common approaches.
+
+## Feature Selection
+
+A **Feature** in ML-lingo is just a predictor, so 'Feature Selection' just means 'choosing predictors', and there are many approaches for automating this. Again, we should be using our biological knowledge of the system in order to select features/predictors, but sometimes there are so many potential predictors that we need to automate the task.
+
+A very simple but powerful approach to feature selection is just to apply our linear models, and use the p-value as a cutoff to decide which features to include.
+
+You might be thinking 'what about the False Discovery Rate (FDR) that we covered in the [Advanced LM Tutorial](https://colauttilab.github.io/RIntroStats/4_AdvancedLM.html)?' 
+
+We know that the more features we test, the more we expect to find are significant, just by chance.
+
+However, in the case of ML models, we are not so interest in the significance of any particular predictor. We aren't formulating hypotheses based on those predictors. Instead, we are just using a cutoff for deciding which predictors we want to include and which we want to exclude. 
+
+
+## Dimension Reduction
+
+**Dimensionality** is just another fancy word for 'number of predictors'. If we have 2 predictors, we have 2 dimensions of data, which we can plot in a simple x vs. y figure in ggplot. We can expand this idea to any number of predictors, it's just more complicated to try to visualize those interactions.
+
+When 2 or more predictors are colinear or we expect some colinearity for biological reasons, then we can use dimension reduction methods. We saw a very rudamentary attempt to do this in the [GAM Tutorial](https://colauttilab.github.io/RIntroStats/9_GAM.html#Phenotypes) when we just averaged measurements across years to get an average flowering time and an average size at flowering.
+
+Principal Components Analysis is a more common and more robust approach that is the basis for many ML models. This is covered in the [PCA Tutorial](https://colauttilab.github.io/RIntroML/2_PCA.html)
+
+# Scaling
+
+Another important consideration for ML models is scaling. Scaling is important when our measurements are on different scales, which is true for most biological variables.
+
+Sometimes we do want to use unscaled variables. The basic rule of thumb is to only use unscaled data when you want to incorporate differences in variance among your predictors. 
+
+Recall in the [Distributions Tutorial](https://colauttilab.github.io/RIntroStats/1_Distributions.html#z-score) that we can calculate a z-score by subtracting the mean and dividing by the standard deviation. 
+
+The z-score is is a common scaling technique, but there are many others. Generally, the approaches standardize to the mean or max/min range:
+
+  * Standard or z-score $\frac{x-mean(x)}{s}$ This is the most common scalar.
+  * Robust $\frac{x-median(x)}{Q_3-Q_1}$ where $Q_3$ and $Q_1$ are the 3rd and 1st quartiles, respectively. This is similar to z-score but is more robust to outliers. The `quantile()` function in R is useful for finding quartiles.
+  * Min-Max $\frac{x-max(x)}{max(x)-min(x)}$
+  * Max Abs $\frac{x}{max(abs(x))}$
+
+The `normalize()` function in R is a useful tool for scaling columns in a data frame. More advanced transformations are not covered in this tutorial but worth investigating for complex datasets (e.g. many outliers, nonparametric distributions).
+
+
+
+
+
+
+
