@@ -128,7 +128,7 @@ There are many ways to do this. The best approaches are guided by a good biologi
 
 ## Feature Selection
 
-A **Feature** in ML-lingo is just a predictor, so 'Feature Selection' just means 'choosing predictors', and there are many approaches for automating this. Again, we should be using our biological knowledge of the system in order to select features/predictors, but sometimes there are so many potential predictors that we need to automate the task.
+A **Feature** in ML-lingo is just a predictor, so 'Feature Selection' just means 'choosing predictors', and there are many approaches for automating this. Again, we should be using our biological knowledge of the system in order to select features, but sometimes there are so many potential features that we need to automate the task.
 
 A very simple but powerful approach to feature selection is just to apply our linear models, and use the p-value as a cutoff to decide which features to include.
 
@@ -136,14 +136,14 @@ You might be thinking 'what about the False Discovery Rate (FDR) that we covered
 
 We know that the more features we test, the more we expect to find are significant, just by chance.
 
-However, in the case of ML models, we are not so interest in the significance of any particular predictor. We aren't formulating hypotheses based on those predictors. Instead, we are just using a cutoff for deciding which predictors we want to include and which we want to exclude. 
+However, in the case of ML models, we are not so interest in the significance of any particular features. We aren't formulating hypotheses based on those features. Instead, we are just using a cutoff for deciding which features we want to include and which we want to exclude. 
 
 
 ## Dimension Reduction
 
-**Dimensionality** is just another fancy word for 'number of predictors'. If we have 2 predictors, we have 2 dimensions of data, which we can plot in a simple x vs. y figure in ggplot. We can expand this idea to any number of predictors, it's just more complicated to try to visualize those interactions.
+**Dimensionality** is just another fancy word for 'number of features'. If we have 2 features, we have 2 dimensions of data, which we can plot in a simple x vs. y figure in ggplot. We can expand this idea to any number of features, it's just more complicated to try to visualize those interactions.
 
-When 2 or more predictors are colinear or we expect some colinearity for biological reasons, then we can use dimension reduction methods. We saw a very rudamentary attempt to do this in the [GAM Tutorial](https://colauttilab.github.io/RIntroStats/9_GAM.html#Phenotypes) when we just averaged measurements across years to get an average flowering time and an average size at flowering.
+When 2 or more features are colinear or we expect some colinearity for biological reasons, then we can use dimension reduction methods. We saw a very rudamentary attempt to do this in the [GAM Tutorial](https://colauttilab.github.io/RIntroStats/9_GAM.html#Phenotypes) when we just averaged measurements across years to get an average flowering time and an average size at flowering.
 
 Principal Components Analysis is a more common and more robust approach that is the basis for many ML models. This is covered in the [PCA Tutorial](https://colauttilab.github.io/RIntroML/2_PCA.html)
 
@@ -151,7 +151,9 @@ Principal Components Analysis is a more common and more robust approach that is 
 
 Another important consideration for ML models is scaling. Scaling is important when our measurements are on different scales, which is true for most biological variables.
 
-Sometimes we do want to use unscaled variables. The basic rule of thumb is to only use unscaled data when you want to incorporate differences in variance among your predictors. 
+Scaling usually involves to components that can vary across different features: **mean** and **variance**. Equations for scaling generally adjust for one or both of these.
+
+There are a few cases where we might want to use unscaled variables. The basic rule of thumb is to only use unscaled data when you want to incorporate differences in the mean and variance among your features. 
 
 Recall in the [Distributions Tutorial](https://colauttilab.github.io/RIntroStats/1_Distributions.html#z-score) that we can calculate a z-score by subtracting the mean and dividing by the standard deviation. 
 
