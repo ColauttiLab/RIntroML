@@ -263,14 +263,14 @@ Load<-FlwrPCA$loadings[1:4]
 print(Load)
 ```
 
-If we multiply each loading by its corresponding feature vector, and then sum, we get the PC axis, which we can confirm by plotting:
+If we multiply each loading by its corresponding feature vector, and then sum, we get the PC axis, which we can confirm by plotting. We also have to make sure we scale each measurement to z-scores. The `scale` function in R is good for this:
 
 ```{r}
 testDat<-Flwr %>%
-  mutate(PCcalc=Flwr07*Load[1] + 
-           Flwr08*Load[2] +
-           Flwr09*Load[3] +
-           Flwr10*Load[4])
+  mutate(PCcalc=scale(Flwr07)*Load[1] + 
+           scale(Flwr08)*Load[2] +
+           scale(Flwr09)*Load[3] +
+           scale(Flwr10)*Load[4])
 testDat$Comp.1<-FlwrPCA$scores[,1]
 qplot(Comp.1,PCcalc,data=testDat)
 ```
@@ -377,6 +377,12 @@ autoplot(PCfull, data=PCDat, colour="Site", loadings=T, loadings.label=T)
 
 Compare the direction of these projected eigenvectors to the loadings in the output for PCfull, above. We can see that PC1 is affected by all three measurements whereas component 2 is more affected by InfMass and Flwr. Notice how the same measurement in different years all have very similar vectors. This shows that the same measurements in different years are collinear.
 
+
+# QA/QC
+
+PCA has important assumptions that should be checked. As with linear models, we may want to transform some of the input variables to help meet model assumptions. The key assumptions is that input variables are **multivariat normal.** This means that if we graph each pair of input variables, they should form a 'shotgun' pattern that is approximately circular (or oval) with the highest density of points in the middle. As Principal Components are linear combinations of input variables, outliers and non-normal distributions tend to bias the loadings of particular PC axes.
+
+Another important assumption is that the major axes of variation are the axes of interest. In the examples above, we saw how variation along PC1 is largely due to genetic variation while PC2 is largely due to environmental variation. But it may not always be like this. For example, we may have multiple axes of environmental variation and genetic variation might be spread across many axes. In such a case, we may want to rescale or 'rotate' our axes in a way that maximizes variation among populations. Although we can't do this with PCA, there are other methods based on PCA that we can try.
 
 # Beyond PCA
 
