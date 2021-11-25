@@ -527,7 +527,7 @@ Where COV is the covariance matrix and I is the identity matrix. The identity ma
 
 One BIG advantage of the RDA over LDA is that it can be applied to data where the number of features is much larger than the number of observations. The reason is that LDA (like PCA) works on the covariance matrix, which is undefined when Features > Observations. Instead of the covariance (or correlation) matrix, the RDA uses a regularized covariance matrix.
 
-The important question is: how do we choose which values for $\gamma$ and $\lamda$? The beauty of machine learning is that we can let the data tell us as part of the model training process.
+The important question is: how do we choose which values for $\gamma$ and $\lambda$? The beauty of machine learning is that we can let the data tell us as part of the model training process.
 
 First, we'll load the `klaR` and `caret` libraries, which include tools for rda and machine learning, respectively
 
