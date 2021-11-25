@@ -1,0 +1,699 @@
+---
+title: "Regularized Discriminant Analysis"
+output: html_document
+---
+
+# Overview
+
+In the [PCA Tutorial](https://colauttilab.github.io/RIntroML/2_PCA.html) we looked at Principal Components Analysis as an example of **Unsupervised Machine Learning** because there were no *a priori* groups that we could use to train the model. Instead, we just used PCA to identify uncorrelated (i.e. orthogonal) axes of variation, and then looked at our groups *post hoc* to see how they mapped onto the major PC axes. 
+
+In this tutorial we look at **Regularlized Discriminant Analysis (RDA)** as an extension of PCA that uses a categorical variable for **Supervised Learning**. In supervised learning, we know the groups ahead of time and try to find a model that distinguishes them. With PCA, we defined component axes based on variation in the features themselves. In our example case, we found that the major axes correspond to genetic population (PC1) and growing environment (PC2). BUT that won't always be the case.
+
+With RDA, we try to redefine the First Component Axis by changing the axis loadings, applying a linear or nonlinear equation to predict the response variable. The closest analogy is to think of a logistic regression with a binary response variable and multiple continuous predictors. With an RDA we also have a binary response variable and multiple continuous predictors. Remember that we can redefine a variable with N categories with N-1 binary variables, as we'll see in our example below.
+
+## Terminology
+
+The terminology can get a bit confusing. You may see the term Discriminant Analysis (DA), which is really a Linear Discrimimant Analysis (LDA) or sometimes caled a Discriminant Function Analysis (DFA). The LDA is a generalization of Fisher's Linear Discriminant -- the same Fisher who invented ANOVA and Fisher's Exact Test, who was also an Evolutionary Biologist who contributed key insights into population genetics.
+
+Later, the LDA was generalized to the **Quadratic Discriminant Analysis (QDA)**, which includes a tuning parameter for unequal variances in the feature predictions. And then later the QDA was generalized to the **Regularized Discriminant Analysis (RDA)** by adding a second tuning parameter. We'll look at these tuning parameters ($\gamma$ and $\lambda$) in the example below.
+
+# Setup
+
+Load the usual plotting and data management functions:
+
+```{r}
+library(ggplot2) # plotting library
+library(dplyr) # data management
+
+source("http://bit.ly/theme_pub") # Set custom plotting theme
+theme_set(theme_pub())
+```
+
+For RDA we will use functions from the `MASS` package. Don't forget to `install.packages("MASS")` the first time you use it.
+
+```{r}
+library(MASS)
+```
+
+# Input Data
+
+The data we'll be working on today come from nasal swabs of patients that were analyzed using a method called **metabolomics**. This is just a fancy word for chemical analysis using [High Performance Liquid Chromatography (HPLC)](https://en.wikipedia.org/wiki/High-performance_liquid_chromatography). For our purposes, just know that there are a set of chemicals that we can identify and then measure their concentrations. These concentrations vary by orders of magnitude so this is a prime candidate for scaling our data, as discussed in the [Intro to ML Tutorial](https://colauttilab.github.io/RIntroML/index.html#Scaling).
+
+```{r}
+VirDat<-read.csv("https://colauttilab.github.io/Data/ViralMetData.csv", header=T)
+head(VirDat)
+```
+
+  * **Sample.Name** -- A unique identifier for each sample
+  * **Batch.Number** -- A unique number for each 'batch'. All the samples with the same 'batch' were run on the equipment at the same time. **Batch Effects** are common in this kind of analysis, where we can get slight differences in some of the measurements due to a variety of reasons (e.g. technician handling, differences in age of chemicals, etc.)
+  *  **Class.name** -- This is the group classifier, and there are four groups: 
+    * **VTM** -- this is just the liquid used to stabilize the nazal swab. It is purchased from a biotech company so the exact chemical profile is unknown. Including it in the analysis acts as one type of control.
+    * **Control** -- nasal swabs from patients with no known infection
+    * **COVID19** -- patients who tested positive for COVID-19 via qPCR
+    * **Influenza** -- patients who tested positive for Influenza via qPCR
+    * **RSV** -- patients who tested positive for Respiratory Syncytial Virus (RSV) via qPCR
+    * **Age**, **Sex** -- Age and sex of the patient
+    * **CT** -- Ct is short for 'count' or 'count threshold' and it a measure of viral load in qPCR (see below).
+    * **Other columns** -- Each of the other columns, from Gly through C18.1OH represents a chemical profile. You don't need to worry about the specific names or chemicals, just know that each column represents a different chemical with a unique chemical signature. The values in each column is a measure of concentration. Technically, it's the estimated area under a curve, and the curve is a measure of concentration over time -- review the [HPLC Wikipedia Page](https://en.wikipedia.org/wiki/High-performance_liquid_chromatography) for more information on how the HPLC works. For now you just need to know that the value is an estimate of the concentration.
+    
+Note: Quantitative PCR (qPCR) is also known as Real-Time PCR (RT-PCR), which is NOT THE SAME as reverse-transcription PCR (also RT-PCR). See [Wikepedia qPCR/RT-PCR](https://en.wikipedia.org/wiki/Real-time_polymerase_chain_reaction) vs [Reverse-transcription PCR](https://en.wikipedia.org/wiki/Reverse_transcription_polymerase_chain_reaction). 
+
+The CT or 'count threshold' is the number of cycles of PCR that have run before the target sequence reaches the detection threshold. So the LARGER the CT, the more PCR cycles, and therefore the LESS template. Less template DNA represents a lower viral load. Therefore: **Higher CT = Lower viral load**
+
+# Data Inspection
+
+Looking at a few of the concentrations, we can see characteristic log-normal distributions, with very different median concentrations (compare x-axes)
+
+```{r}
+qplot(x=Gly,data=VirDat)
+qplot(x=Pyruvic.acid,data=VirDat)
+qplot(x=log(Gly+1),data=VirDat)
+```
+
+# QA/QC
+
+First we should do some quality checks and modify data to fit assumptions of multivariate normality.
+
+One thing we should do is set our batch effects as a factor so that we don't accidentally analyze it as a numeric variable:
+
+```{r}
+VirDat$Batch.Number<-as.factor(VirDat$Batch.Number)
+```
+
+The next thing we'll want to do to make things easier, is to create separate data sets for our predictor and response variables.
+
+From above, we see that the first six columns of data are the predictors, and the rest are our features:
+
+```{r, error=TRUE}
+RespDat<-VirDat %>%
+  select(1:6)
+```
+
+What does this error mean? It's a bit tricky, but there is a clue if we look at the help for `?select`:
+
+If you do that, you will see that `select` is a function with the same name in the `dplyr` AND the `MASS` libraries. Since `MASS` was loaded second in our setup above, R assumes that `MASS` is the version of `select` that we want to use. To avoid this error, we use `::` to specify the package: 
+
+```{r}
+RespDat<-VirDat %>%
+  dplyr::select(1:6)
+Features<-VirDat %>%
+  dplyr::select(-c(1:6)) 
+```
+
+Now we have two datasets, one containing the potential predictors, and one containing the responses.
+
+> Verify that the correct columns are subset in each dataset
+
+# Scaling
+
+Scaling is an important part of QA/QC, but it's important enough to get its own heading. 
+
+We want to do is scale all of our chemical columns to the same mean and standard deviation. We could code a very long pipe function to scale each column, or we can take a shortcut by separating our predictor data from our feature data.
+
+We can use a shortcut to scale each column of the Features dataset. Really, we should look at each scaled histogram to decide if the feature should also be log-transformed, but for now we'll just use the regular scaling.
+
+```{r}
+Scaled<-Features %>%
+  mutate_all(scale)
+```
+
+# Missing Data
+
+As with PCA, missing data will cause a problem for our analyis, so we should check if any of our features have missing data:
+
+```{r}
+Scaled %>%
+  select_if(function(x) any(is.na(x))) %>%
+  names()
+```
+
+As with our PCA, we want to impute missing data or else we have to exclude the entire row even if only one value is missing. Since we have scaled everything to a mean of 0, there is a quick and easy way to do this now that we have our features in a separate object:
+
+```{r}
+ScalComp<-Scaled %>%
+  mutate(Putrescine = ifelse(is.na(Putrescine),0,Putrescine),
+         Leu = ifelse(is.na(Leu),0,Leu),
+         Asp = ifelse(is.na(Asp),0,Asp),
+         Lactic.acid = ifelse(is.na(Lactic.acid),0,Lactic.acid),
+         Butyric.acid = ifelse(is.na(Butyric.acid),0,Butyric.acid),
+         Succinic.acid = ifelse(is.na(Succinic.acid),0,Succinic.acid),
+         Pyruvic.acid = ifelse(is.na(Pyruvic.acid),0,Pyruvic.acid))
+```
+
+Now check our QA/QC output:
+
+```{r}
+mean(ScalComp$Gly)
+sd(ScalComp$Gly)
+qplot(x=Gly,data=ScalComp)
+```
+
+Note the mean = 0 and sd = 1. The data are not perfectly normal, but it's close enough to continue our analysis. Real-world data are messy.
+
+# Dimension Reduction
+
+Looking at the dimensions of our scaled features:
+
+```{r}
+dim(ScalComp)
+```
+
+We can see that we have almost as many columns of predictors ($k=124$) as rows of observations ($n=221$). If we just throw everything into an RDA we risk 'overfitting' our model, just as we would run into a false discovery problem if we ran a separate linear model for each feature as a predictor.
+
+This problem is discussed in the [Intro ML Tutorial](https://colauttilab.github.io/RIntroML/index.html#Too_Many_Predictors). 
+
+## PCA
+
+One solution would be to do a PCA and retain only the major axes. Since we have already scaled our variables, we do not need `cor=TRUE` as we did in the [PCA Tutorial](https://colauttilab.github.io/RIntroML/2_PCA.html#Scaling).
+
+```{r}
+PCA<-princomp(ScalComp)
+summary(PCA)
+```
+
+Here we can see most of the variation is explained by the first few PC axes. BUT we also know that humans can have a lot of variation in their metabolomic profiles. What if the difference due to infection accounts for only a small amount of variation in metabolites? In that case, we might be excluding valuable data.
+
+## Feature Selection
+
+Since we have a categorical response variable, we have another option for feature selection. Instead of collapsing to a few PC axes, we can quickly look at the predictive power of each feature and only retain those that are reasonably good at distinguishing among groups.
+
+'Reasonably good' is a subjective term, and the definition we use will depend on the number of features that we want to include. 
+
+Probably the simplest approach is to do a simple linear model for each feature. However, in this case we will use `Class.name` as the predictor and each Feature as the response. Then we can use R^2 or p-value to define a cutoff. We aren't too worried about the False Discovery Rate here because we aren't testing 124 independent hypotheses. Instead, we are just using the fit of the models to decide which features to include in the analysis.
+
+Now the problem is that we would have to write code for 124 different linear models, look at the output, and then decide which p-value to use as a cutoff. 
+
+We can use a trick here that we first covered in the [Mixed Models Tutorial](https://colauttilab.github.io/RIntroStats/8_MixedModels.html#Repeated_Measures) when we talked about repeated measures data and the 'long' format. 
+
+In this case, the 'long' format means that we collapse all of our 124 features column into two columns: one for the value observed for each feature (i.e. the number in each cell) and a second column specifying which feature it is (i.e. the column name). 
+
+This is easily done with the `pivot_longer()` function from the `tidyr` library:
+
+```{r}
+library(tidyr)
+
+FeatureSel<-ScalComp %>%
+  mutate(Class.name=VirDat$Class.name) %>% # Add the Response variable
+  pivot_longer(cols=-Class.name, 
+               names_to="Chem",
+               values_to="Conc")
+str(FeatureSel)
+```
+
+Here we see just three columns: Class.name, the specific chemical (formerly the column header) and the concentration (formerly cell value for each column header).
+
+We have 27,404 rows instead of 221 because each of the original rows is repeated 124 times (one for each feature). We can do a lot of things with this data. One obvious one would be to use `facets=Chem` in a `qplot` or `ggplot` to create a separate graph for each of the chemicals. This would be useful for visually inspecting for outliers, lognormal distributions, etc. We might want to output this to a large jpeg or pdf file since it will be hard to squeeze all those graphs into our small plotting area.
+
+Another thing we can do now is to calculate summary statistics to make sure we have mean ~ 0 and sd ~ 1, and check the max and min values
+
+```{r}
+FeatureSel %>%
+  group_by(Chem) %>%
+  summarize(MeanConc=mean(Conc),
+            sd=sd(Conc),
+            max=max(Conc),
+            min=min(Conc))
+```
+
+We can also run separate linear models using the `do` function with `group_by`, except that we also want to extract the p-values specifically. To think about how to do this, let's look at a single linear model:
+
+```{r}
+Mod<-lm(ScalComp$Gly ~ RespDat$Class.name)
+ModOut<-anova(Mod)
+ModOut
+```
+
+the `anova` function gives us the p-values, which we can also pull out if we set the output of anova to an object
+
+```{r}
+ModOut[1,"Pr(>F)"]
+```
+OR we can do just create a nested function:
+
+```{r}
+anova(lm(ScalComp$Gly ~ RespDat$Class.name))[1,"Pr(>F)"]
+```
+
+Now we apply this with `dplyr`, which gives us a weird object, which we can convert back to a `data.frame`
+
+```{r}
+PVals<-FeatureSel %>%
+  group_by(Chem) %>%
+  summarize(P = anova(lm(Conc ~ Class.name))[1,"Pr(>F)"]) %>%
+  dplyr::select(Chem,P)
+
+head(PVals)
+```
+
+So how do we find a good cut-off value? The more stringent the cutoff (i.e. smaller P), the stronger our prediction, but the less features we will retain. We need to find a balance. A good first step is to plot a histogram:
+
+```{r}
+qplot(x=P,data=PVals)
+```
+
+We can see more than 40 features close to zero. That shows us that there are a lot of features (i.e. biological compounds) that differ amon the groups. It's much better than 124, but still quite a few for this small dataset of just 221 observations. We can try to reduce this further by thinking about the biology of the system and the goal of our model. 
+
+We want to predict the differences among groups:
+
+```{r}
+unique(VirDat$Class.name)
+```
+
+But we also need to come up with binary groupings to run RDA, so could focus on a few different goals:
+
+  1. Distinguish the control stabilizing solution (VTM) from the patient samples (all others)
+  2. Distinguish healthy patients (Control) from infected (COVID19, Influenz, RSV)
+  3. Distinguish COVID19 from health patients
+  4. Distinguish COVID19 from other respiratory (Influenza & RSV)
+
+There are of course many more goals/models we could come up with using different binary combinations of these groups, but these are probabably the more interesting ones. For each model we could do a separate feature selection step. Let's focus on the last one -- distinguishing COVID19 patients from other respiratory infections. This means we'll have to drop VTM and Control, and then combine Influenza and RSV into a single group. Then we re-run our feature selection pipeline as above:
+
+```{r}
+PCOV<-FeatureSel %>%
+  filter(Class.name %in% c("COVID19","Influenza","RSV")) %>%
+  mutate(NewGroup = replace(Class.name, Class.name == "Influenza", "NonCOV")) %>%
+  mutate(NewGroup = replace(Class.name, Class.name == "RSV", "NonCOV")) %>%
+  group_by(Chem) %>%
+  summarize(P = anova(lm(Conc ~ NewGroup))[1,"Pr(>F)"]) %>%
+  dplyr::select(Chem,P)
+qplot(x=P,data=PCOV) + xlim(0,0.1)
+```
+
+Now we are down to ~15 features with P < 0.05, which we can use to define a new Features dataset:
+  
+```{r}
+Keep<-PCOV %>%
+  filter(PCOV$P < 0.05)
+Keep<-paste(Keep$Chem)
+```
+
+This gives us a vector of chemical names that we can use to select columns
+
+```{r}
+ScaledSub<-ScalComp %>%
+  dplyr::select(all_of(Keep))
+names(ScaledSub)
+```
+
+# LDA
+
+Now that we have our subset of features, we can run a Linear Discriminant Analysis (LDA). The `lda` function from the MASS package is pretty straight forward. There are a couple of ways we can specify the model. The first is to use an equation similar to the linear model: `Y ~ .` where `Y` is the column name of the categorical variable and `.` means 'all other columns of data'. We would also need to specify the data object with `data =`
+
+Since we have our categorical response variable and features in two different objects, we can plug them in without the `data =` parameter.
+
+We also have to remember to recode our response into the same binary variables as above.
+
+```{r}
+RDAResp<-RespDat %>%
+  mutate(NewGroup = replace(Class.name, Class.name != "COVID19", "NonCOV"))
+```
+
+```{r}
+LDAMod<-lda(x=ScaledSub,grouping=RDAResp$NewGroup)
+```
+
+## Output
+
+Let's take a look at the output of the LDAMod. What type of data structure does it create?
+
+```{r}
+str(LDAMod)
+```
+
+We can try the `summary()` function:
+
+```{r}
+summary(LDAMod)
+```
+
+Unlike an linear model (`lm`) object, the `summary()` function for the `lda` object summarizes the object itself. The left-hand column gives the names of the list items, and the 'Length' gives the number of elements. 
+
+Let's take a quick look at a few of the list items, which are also explained the lda help: `?lda`.
+
+Counts show the sample size for each group:
+
+```{r}
+LDAMod$counts
+```
+
+Scaling shows the factor loadings. Compare this to the **Eigenvectors** of a the Principal Components Analysis. There are some important differences. We only have ONE LD axis for 16 features, whereas PCA would give us 16 axes. The number of axes in an LD are determined by the number of categories of the response variable, rather than the number of features.
+
+> The number of LD axes = Number of Categories - 1
+
+Apart from that, the idea is the same. The loadings for LD1 show how each feature contributes to the LD1 axis. 
+
+```{r}
+LDAMod$scaling
+```
+
+We can see above that higher values of LDA are determined largely by higher values of *LYSOC18(.1 and .2)* and *Tyramine*, and lower values of *Taurine*. This might also tell us something about the pathology of the disease, but here we are just focusing on the data analysis.
+
+Another important distinction from the `princomp` output is that there are no `scores` in the LDA output. To find the scores, we use a different approach:
+
+# Predictions
+
+We can use the `predict` function with the LDA object to generate additional info:
+
+```{r}
+PredOut<-predict(LDAMod)
+summary(PredOut)
+```
+
+Note that we have a `class` prediction and an `x` prediction, and both have the same length as the number of observations in our dataset. 
+
+The `x` object here is the predicted `score` for the LDA axis:
+
+```{r}
+head(PredOut$x)
+```
+
+and the `class` object is the predicted category:
+
+```{r}
+head(PredOut$class)
+```
+## Confusion Matrix
+
+We can generate a confusion matrix by comparing the predicted vs. observed. 
+
+```{r}
+CatDat<-data.frame(Observed=as.factor(RDAResp$NewGroup),Predicted=PredOut$class)
+table(CatDat)
+```
+
+This is called a **confusion matrix** and it is related to the false discovery rates covered in the [Advanced LM Tutorial](https://colauttilab.github.io/RIntroStats/4_AdvancedLM.html#FDR).
+
+Be careful with the rows and columns. By convention, the prediction is usually given as columns and the observed/actual given as rows, but it's worth checking.
+
+Using our LDA model, we have 40 True Positive, 155 True Negative, 11 False Positive, and 15 False Negative cases. We can calculate the model **accuracy**, **specificity** and **sensitivity** using these values.
+
+> Calculate the Accuracy, Specificity, and Sensitivity of this LDA model
+
+## Posterior Probabilities
+
+The `posterior` object gives the **posterior probability** for each category. This is a concept in **Bayesian statistics** that isn't covered here. For now, just know that these are probabilities for assigning each observation to each group:
+
+```{r}
+Post<-as.data.frame(PredOut$posterior)
+head(Post)
+```
+
+The rows add up to 1 and the columns represent the probability that each individual (row) belongs to that category. For example, we see in all 6 cases that there is predicted to be >90% chance that these individuals belong to the NonCOV group. We can get a sense of how well our model performs by plotting these:
+
+```{r}
+Post$Group<-RDAResp$NewGroup
+qplot(x=COVID19,y=NonCOV,colour=Group,data=Post,alpha=I(0.3))
+```
+
+A perfect model would have all of the COVID samples in the lower right corner and all of the NonCOV samples in the top left corner.
+
+The X-axis of this graph is the predicted probability that the patient has COVID19. Let's compare this to the LD1 scores:
+
+```{r}
+Post$LD1<-as.vector(PredOut$x)
+qplot(LD1,COVID19,data=Post)
+```
+
+We can see how the probability is a nonlinear function of LD1. Now imagine a new patient comes in and we look at their metabolite profile to predict whether they have COVID19. We can define the probability, but policy is usually based on a firm decision. Ultimately we have to classify this patient one way or the other, and that will have real-world consequences for the patient and the potential spread of infection.
+
+> Which value of LD1 should we use to categorize the patient?
+
+One answer might be the point along LD that corresponds to 0.5 on the y-axis. 
+
+On the other hand, we might want to error on the side of caution to limit our false-negative rate (i.e. patients with COVID who are told they don't have it)
+
+There may be other (non-COVID) datasets where we want to error on the side of limiting our false positive rate.
+
+Regardless, it would be helpful to know how different threshold values of LD1 affect the number of false positive vs. false negatives. This is shown in a graph called the ROC.
+
+# ROC
+
+The **Receiver-Operator Curve (ROC)** is a measure of model performance based on the rates of false positive vs. false negatives. To calculate the curve, we set a value of LD1, then look at the confusion matrix and calculate the False positive rate vs. True positive rate. Here 'rate' means proportion: If we look at all the predicted positives, what proportion are true positive vs true negative? These rates will of course add up to 1 (100%).
+
+Rather than calculate by hand...
+
+```{r}
+library(pROC)
+plot.roc(Group~LD1, data=Post)
+```
+
+Let's take a moment to think about what this curve means. If our LD axis was a random preditor, we would expect predictions along the grey line. Our actual model is the dark black line.
+
+Now looking at the x=axis you can see we start on the left-hand side with 100% specificity and 0% sensitivity. As we move right we quickly increase sensitivity with only a tiny decresae in specificity up to about 0.8 on the y-axis. After this, we have to sacrifice a lot of specificity for a small increase in sensitivity.
+
+Overall, this is a pretty good model.
+
+> What would the curve look like for a super-accurate model?
+
+## AUROC
+
+We can measure the area **Area Under the Curve (AUC)** or **Area Under the ROC (AUROC)** as a measure of the performance of the model. The random model is a simple triangle (grey line, above) which shows that the minimum AUC is 0.5. As our model improves we get something closer to a square (100% accuracy across all values of Specificity), giving us the maximum value of 1.
+
+> AUC ranges from 0.5 to 1.
+
+We can use the `auc` function from the same `pROC` package to calculate the area under the curve:
+
+```{r}
+auc(Group~LD1, data=Post)
+```
+
+# Multi-Category
+
+What if we want to expand our model to look at all of the different classes, not just COVID vs nonCOV? A good approach is to set different binary axes and run a separate LDA for each.
+
+On the other hand, if we want to throw everything into an LDA, we can do that too:
+
+```{r}
+LDAMult<-lda(x=ScalComp,grouping=RDAResp$Class.name)
+summary(LDAMult)
+```
+
+Note that we now have 5 categories and 4 LD axes. Each LD axis is like a mini LDA for each category vs. all of the others grouped together.
+
+
+# QDA
+
+Notice in the LDA how our LD1 axis is a linear combination of our features. Just like principal components axes, we can calculate a `score` for each observation (i.e. patient) by multiplying the standardized Feature value by its factor loading.
+
+But what if factors have non-linear effects? The QDA is a form of nonlinear RDA that is good when the different groups have different variances. In our case, we grouped together VTM and uninfected patients with Influenza and RSV patients. These are likely more variable than the COVID19 patients. 
+
+The **Quadratic Discriminant Analysis (QDA)** scales the transformation matrix that is used to calculate the LD axes. In R this is as simple as changing the function name:
+
+```{r}
+QDAMod<-qda(x=ScaledSub,grouping=RDAResp$NewGroup)
+summary(QDAMod)
+```
+
+and the predictions:
+
+```{r}
+QpredOut<-predict(QDAMod)
+summary(QpredOut)
+```
+
+> Compare these to LDA. What is missing?
+
+The biggest change is the loss of a linear predictor (`x` in the LDA prediction output). That's because of the transformation of the data. 
+
+How good are the predictions? Let's look at the confusion matrix:
+
+```{r}
+Qcon<-data.frame(Obs=as.factor(RDAResp$NewGroup),Pred=QpredOut$class)
+table(Qcon)
+```
+
+This model performs a lot better. We also can't do an ROC or AUROC because we don't have a linear predictor. Compare this to the LDA and you can see this model performs better.
+
+Comparing the LDA to the QDA is a good example of the trade-off between **prediction** and **interpretability** that we covered in the [Intro to ML Tutorial](https://colauttilab.github.io/RIntroML/index.html#Prediction_and_Interpretability). The QDA is better at *predicting* the category, but the LDA is more *interpretable* because we can look the `scaling` of LD1 to see how the features (biochemicals) map to the prediction (LD1).
+
+# RDA
+
+Finally, we arrive at the **Regularized Discriminant Analysis (RDA)**, which incorporates elements of both the LDA and QDA.
+
+The analysis requires two 'tuning parameters' $\lambda$ and $\gamma$. Each of these range from 0 to 1 and define a range of models with 4 special cases:
+
+  * **LDA** when $\lambda=1$ and $\gamma=0$
+  * **QDA** when $\lambda=0$ and $\gamma=0$
+  * When $\lambda=0$ and $\gamma=1$: Different variance like the LDA
+  * When $\lambda=1$ and $\gamma=1$: Equal variances like the QDA
+  
+From these examples, you can see that the $\lambda$ parameter ranges from QDA to LDA when $\gamma=0$. This is the scaling of the variances within groups.
+
+The $\gamma$ parameter itself is called a 'regularization' parameter. It defines the scale of the covariance matrix:
+
+$$COV_\gamma = (1-\gamma)COV + \gamma I $$
+
+Where COV is the covariance matrix and I is the identity matrix. The identity matrix is just a matrix with 1 along the diagonal. So gamma=1 sets the covariance matrix to the identity matrix.
+
+One BIG advantage of the RDA over LDA is that it can be applied to data where the number of features is much larger than the number of observations. The reason is that LDA (like PCA) works on the covariance matrix, which is undefined when Features > Observations. Instead of the covariance (or correlation) matrix, the RDA uses a regularized covariance matrix.
+
+The important question is: how do we choose which values for $\gamma$ and $\lamda$? The beauty of machine learning is that we can let the data tell us as part of the model training process.
+
+First, we'll load the `klaR` and `caret` libraries, which include tools for rda and machine learning, respectively
+
+```{r}
+library(klaR)
+library(caret)
+```
+
+## Grid Search
+
+We have two tuning parameters that we want to 'optimize'. One way to do this is to set a range of values for each, run a model with each combination of parameter values, and then compare the fit of the different models. This is called a **grid search**. Think of a the parameters as a grid, say with $\lambda$ on the x-axis and $\gamma$ on the y axis (or more axes for more parameters) -- each grid square/cube/hypercube is a specific set of parameter values. 
+
+The problem with grid search is that the number of models increases exponentially with the number of parameters and the degree of precision we want in the parameters (e.g. 0.5 vs. 0.1 vs 0.01 etc). There are more efficient methods for more complicated models.
+
+But for an RDA, we don't care so much about getting high-precision values since we just want to find a 'good' model even if it is not the 'best' model.
+
+## Random Search
+
+Instead of defining regularly spaced intervals, we can randomly select values along the range of 0 to 1 for each parameter, run the model, and then measure its performance. This is called a **random search**
+
+## `trainControl`
+
+Rather than write some long code to do a parameter search, we can use the `train` function from the `caret` package to automate a lot of this.
+
+The first step is to make a `trainControl` object specifying some of the details of the training options that we want to use
+
+
+```{r}
+CTL<-trainControl(method="repeatedcv",
+                         number=4,
+                         repeats=24,
+                         classProbs=T,
+                         verboseIter=F,
+                         search="random")
+```
+
+  * `method="LOOCV"` -- the method of sampling from the dataset. We are using the **Leave-One-Out Cross Validation (LOOCV)** approach because we don't have a very big dataset. If we had thousands or millions of rows, we might want to do a repeated k-fold cross-validation (see [Intro to ML Tutorial](https://colauttilab.github.io/RIntroML/index.html#Cross-Validation)).
+  * `classProbs=T` -- specifies that we want to use the class probabilities specific to each subsample (rather than use the global probability)
+  * ` verboseIter=F` -- the word **verbose** is often used in programming to mean "Give the user more detailed feedback as the program is running". This is handy for debugging and also to make sure the program is running and you computer is not just 'stuck'. On the other hand, it adds to the runtime, which can significantly slow down large analyses. You can try re-running this code and the RDA with `verboseIter=T` to compare the output.
+  * `search="random"` -- specifies a random search (alternative = `grid`)
+  
+To understand what we've made, look at the structure of the object. Note the extra (unspecified) parameters are just thee default:
+
+```{r}
+str(CTL)
+```
+
+
+## `trainClass`
+
+The `trainClass` function does the heavy lifting, with the above object as input for the `trControl` parameter. Note that this will take a few seconds to run. If it is taking too long, reduce the `tuneLength` parameter to a smaller number like 3 or 4.
+
+Since we are using a 'random' design, we will use `set.seed()` to make the results reproducible. See the [R Crash Course Tutorial](https://colauttilab.github.io/RCrashCourse/1_fundamentals.html#random_numbers) if you need a refresher on this.
+
+```{r}
+set.seed(123)
+randomRDA<-train(x=ScaledSub,y=RDAResp$NewGroup,
+                    method="rda",
+                    metric="Accuracy",
+                    tuneLength = 24,
+                    trControl=CTL)
+
+```
+
+Most of these parameters are self-explanatory
+
+Now we can inspect the output and plot the parameters
+
+```{r}
+randomRDA
+ggplot(randomRDA) + theme(legend.position="bottom")
+```
+
+The size of the point corresponds to the accuracy of the model. Here we can see that there isn't much variation as long as $\gamma$ is less than 0.6 and $\lambda$ is above 0.5.
+
+If we set $\gamma=0 and \lambda=1$ then it is just the LDA by definition, as described above. Since the LDA is also more **interpretable**, it seems like a good choice.
+
+## `rda()`
+
+In other cases, we may want to run the RDA with parameters chosen from the above analysis, which is just done using the `rda` function from the `klaR` package:
+
+```{r}
+RDAmod<-rda(x=ScaledSub,grouping=RDAResp$NewGroup,
+            regularization=c(gamma=0.3, lambda=0.9))
+summary(RDAmod)
+```
+
+Compared to the QDA output we have a few more list items, specifically the regularization parameters that we specified, an estimate of the error rate, the individual group covariances and the pooled covariances across all the samples. 
+
+# Cross-validation
+
+Recall the problem of **overfitting** from the [Intro to ML Tutorial](https://colauttilab.github.io/RIntroML/index.html#Overfitting). In the RDA example above, we used cross-validation to fit the parameters. In addition, we can split our data into a training set and a validation set.
+
+## Data Splitting
+
+Data splitting is as simple as breaking the data into two sets: one used to train the model and the second one used to validate the model. We want to be careful to make sure each subset has enough observations, and a good representation of the data. In the extreme example, we wouldn't want 90% of the COVID cases in the training dataset and 90% of the NonCOV cases in the validation dataset.
+
+A typical way to break up the dataset is just to select every Nth row. For example, if we want to split the data in half, then we can just split up the odd vs. even rows of data. 
+
+Since we are working with multiple datasets, we can define a vector of row numbers for each dataset and use it as an index. A simple way to do this is to divide the row number by 2. Odd rows will have a remainder and even rows won't. We can use the `%%` operator which returns a 1 if there is a remainder and 0 if there is not
+
+```{r}
+Rows<-c(1:nrow(RDAResp))
+Train<-Rows %% 2 == 1
+Validate<-Rows %% 2 == 0
+```
+
+> Take a minute to review each object to understand what we did
+
+Now we have a training set (Train) and validation set (Validate):
+
+```{r}
+head(RDAResp[Train,])
+head(RDAResp[Validate,])
+```
+
+Notice the row numbers along the left-hand side of the output.
+
+Now we re-run the code above on the Training dataset and then generate predictions for the Validation dataset. We should start back at the parameter estimation step, specifying the training dataset with square brackets `[Train,] and [Train]`
+
+```{r}
+set.seed(123)
+randomRDA2<-train(x=ScaledSub[Train,],y=RDAResp$NewGroup[Train],
+                    method="rda",
+                    metric="Accuracy",
+                    tuneLength = 24,
+                    trControl=CTL)
+
+```
+
+Now inspect the graph and select appropriate parameter values:
+
+```{r}
+randomRDA2
+ggplot(randomRDA2) + theme(legend.position="bottom")
+```
+
+And finally, run the model on the training dataset:
+
+```{r}
+RDAmod2<-rda(x=ScaledSub[Train,],grouping=RDAResp$NewGroup[Train],
+            regularization=c(gamma=0.3, lambda=0.9))
+```
+
+## Confusion Matrix
+
+To generate the confusion matrix, we first have to predict the classes for our Validation set, using the model generated from our Training set:
+
+```{r}
+Pred<-predict(RDAmod2,ScaledSub[Validate,])
+```
+
+> Inspect the structure of `Pred` to see what kind of object we created
+
+Now we have our predictions that we can compare against the observations
+
+```{r}
+CatDat<-data.frame(Obs=as.factor(RDAResp$NewGroup[Validate]),
+                   Pred=Pred$class)
+table(CatDat)
+```
+
+## CV + Split
+
+Take a minute to think about what we did and why this represents a very robust analysis. First, we separate the data into two sets and we set aside the Validation dataset. Then, we use cross-validation on only the Training dataset in order to train a robust predictive model. Then, we apply the model back to the Validation dataset to see how well the model performs on new data that were not included in the training steps.
+
+How could we improve this even further? Collect new data to test the model!
+
+
