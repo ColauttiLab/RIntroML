@@ -477,7 +477,7 @@ Notice in the LDA how our LD1 axis is a linear combination of our features. Just
 
 But what if factors have non-linear effects? The QDA is a form of nonlinear RDA that is good when the different groups have different variances. In our case, we grouped together VTM and uninfected patients with Influenza and RSV patients. These are likely more variable than the COVID19 patients. 
 
-The **Quadratic Discriminant Analysis (QDA)** scales the transformation matrix that is used to calculate the LD axes. In R this is as simple as changing the function name:
+The **Quadratic Discriminant Analysis (QDA)** scales the transformation matrix that is used to calculate the LD axes. The 'Quadratic' in QDA refers to the predictor, which is quadratic as opposed to the linear LD1 axis in LDA. In R this is as simple as changing the function name:
 
 ```{r}
 QDAMod<-qda(x=ScaledSub,grouping=RDAResp$NewGroup)
