@@ -272,7 +272,7 @@ There are of course many more goals/models we could come up with using different
 PCOV<-FeatureSel %>%
   filter(Class.name %in% c("COVID19","Influenza","RSV")) %>%
   mutate(NewGroup = replace(Class.name, Class.name == "Influenza", "NonCOV")) %>%
-  mutate(NewGroup = replace(Class.name, Class.name == "RSV", "NonCOV")) %>%
+  mutate(NewGroup = replace(NewGroup, Class.name == "RSV", "NonCOV")) %>%
   group_by(Chem) %>%
   summarize(P = anova(lm(Conc ~ NewGroup))[1,"Pr(>F)"]) %>%
   dplyr::select(Chem,P)
