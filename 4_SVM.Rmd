@@ -1,0 +1,265 @@
+---
+title: "Support Vector Machines"
+output: html_document
+---
+
+# Overview
+
+By now you should be comfortable with the [PCA Tutorial](https://colauttilab.github.io/RIntroML/2_PCA.html) and the [LDA/QDA/RDA Tutorial](https://colauttilab.github.io/RIntroML/3_RDA.html). 
+
+Remember that PCA is a type of **unsupervised learning** because we only include the features in the analysis. We plotted PC axes 1 and 2 and colour-coded based on genotype and environment to see how the PC axes capture structure, but the categories themselves were not involved in the analysis.
+
+Remember also that the LDA, QDA, and RDA are different formulations of **discriminant analysis**. These are all examples of **supervised learning** because we included the grouping variable of interest (COVID/non-COVID) in the analysis. We saw how the LDA produces a multivariate axis `LD1` that is conceptually very similar to a principal components axis. Once we move to QDA and RDA we lose the interpretability of a linear feature but gain more powerful models that *can* (but don't always) improve predictability.
+
+More generally, the LDA, QDA and RDA try to optimize **classification**. There are many other kinds of **classification models**, but we'll look at three more algorithms that are similar to each other but different from the LDA/QDA/RDA
+
+  1. The **Maximum Marginal Classifiers** (MMC), 
+  2. The **Support Vector Classifiers** (SVC)
+  3. **Suppport Vector Machines** (SVM)
+  
+Conceptually, the *classifiers* (1 & 2) are very similar to the models covered in the [LM Tutorial](https://colauttilab.github.io/RIntroStats/3_LinearModels.html) and the *support vector machines* are like the spline models covered in the [GAM Tutorial](https://colauttilab.github.io/RIntroStats/9_GAM.html).
+
+There is one critical difference though. With LM/GAM models we are trying to explain variation in the response variable by fitting lines/curves to the features (aka predictors). But with MMC/SVC/SVM we are trying to find a **hyperplane** that separates the data into categories. 
+
+> What is a hyperplane? 
+
+The hyperplane is a geometric shape with dimension equal to the number of features minus 1. It represents a 'flat' surface that separates the classes of interest.
+
+This can be a bit tough to conceptualize, but here is an example that can help.
+
+Imagine you have two features $X_1$ and $X_2$. This means we have 2 dimensions of features, so our hyperplane has dimension of 1, which is just a straight line, as shown in the example below.
+
+```{r, echo=F}
+library(ggplot2)
+source("http://bit.ly/theme_pub") # Set custom plotting theme
+theme_set(theme_pub())
+
+PDat<-data.frame(Group=c(rep("A",50),rep("B",50)),
+                 X1=rnorm(100,mean=1.7),
+                 X2=rnorm(100,mean=23,sd=7))
+PDat$X1[PDat$Group=="A"]<-PDat$X1[PDat$Group=="A"]-4
+PDat$X2[PDat$Group=="A"]<-PDat$X2[PDat$Group=="A"]+30
+
+qplot(x=X1,y=X2,colour=Group,data=PDat) + geom_abline(intercept=38,slope=6.5,colour="grey60",size=1.5)
+```
+
+Now imagine adding a 3rd feature $X_3$ to the above analysis. We would add third axis to the graph and then our hyperplane would have 2 dimensions. You can imagine this as your points floating in 3D space with a sheet of paper trying to separate them. In principle, we can keep adding dimensions to both the features and they hyperplane, which is not intuitive for the human brain. But, just remember these 1d to 3d examples and know that you can expand to any number of features $k$ that define your points in $k$-dimensional space, which you can try to separate using a $(k-1)$-dimensional hyperplane.
+
+One other difference between LM/GAM and MMC/SVC/SVM is in the way the lines are fit. With `lm` function in R uses the **Least Squares** method, while the GAM typically uses an algorithm called **maximum likelihood** or **restricted maximum likelihood** for mixed models. 
+
+The MMC, SVC, and SVM use different optimization algorithms that quickly increase in complexity. It's not important to understand how these work in order to apply the models, but it is helpful to know this: the function that finds the optimal 'fit' or solution is called the **kernel**. You will see this word a lot in the ML literature, and you can get pretty far by just knowing it is some kind of mathematical function and/or computational algorithm for fitting the model to the data.
+
+The specific kernels are described below with each method. HOWEVER, but you don't need to have a deep understanding of these algorithms to apply and interpret the model. In the end, you are just running an algorithm to find a **hyperplane** that separates your classes of interest. Conceptually, these are not much different from a QDA/RDA, except that you are using  different kernels.
+
+# Setup
+
+Load the usual plotting and data management functions.
+
+```{r}
+library(ggplot2) # plotting library
+library(dplyr) # data management
+
+source("http://bit.ly/theme_pub") # Set custom plotting theme
+theme_set(theme_pub())
+```
+
+We'll use the `pROC` library and a new library called `e1071` for support vectors
+
+```{r}
+library(pROC) # For ROC curves
+library(e1071) # For fitting support vector machines
+```
+
+And we'll work with the same viral infection data as described in the [RDA Tutorial](https://colauttilab.github.io/RIntroML/3_RDA.html).
+
+```{r}
+SVCdat<-read.csv("https://colauttilab.github.io/Data/ViralMetData.csv", header=T)
+```
+
+The code below is copied from the RDA Tutorial, where we separate our Features so that we can scale them to mean = 0 and sd = 1...
+
+```{r}
+RespDat<-SVCdat %>%
+  select(Class.name) %>%
+  filter(Class.name %in% c("COVID19","Influenza","RSV")) %>%
+  mutate(Class.name = replace(Class.name, Class.name %in% c("Influenza","RSV"), "NonCOV")) %>%
+  mutate(Class.name = replace(Class.name, Class.name == "RSV", "NonCOV")) 
+Features<-SVCdat %>%
+  filter(Class.name %in% c("COVID19","Influenza","RSV")) %>%
+  select(c("Betaine","C14.1OH","C16.1OH","C2","C7DC","Carnosine","Cit","Glucose","LYSOC16.0","LYSOC18.0","Met.SO","Putrescine","Taurine","Tyramine")) 
+ScalComp<-Features %>%
+  mutate_all(scale)
+```
+
+... and replace missing data. Here we use a short-cut to find all `NA` anywhere in the data.frame and replace with `0`.
+
+```{r}
+ScalComp[is.na(ScalComp)]<-0
+```
+
+## Data frame
+
+Finally, we'll change the name to 'Class' and move it to the first column.
+
+```{r}
+SVDat<-ScalComp %>%
+  mutate(Class=as.factor(RespDat$Class.name)) %>%
+  select(Class,everything())
+head(SVDat)
+```
+
+Note also the `as.factor` function above, to avoid an error if we try to run the SVM on character data.
+
+# Support Vector Classifier (SVC)
+
+The support vector classifier is an extension of the MMC that allows some overlap in points but tries to find the hyperplane that separates most of the points without being unduly influenced by individual points. 
+
+For a set of $k$ features, and a set of observation point $x_i$ is a vector of values for each of the $k$ features, with a group assignment $y_i$ taking on a value of -1 or +1:
+
+The support vector classifier is the $k-1$ hyperplane that best separates the data, following the optimization algorithm (note difference with MMC):
+
+  1. Maximize the vector $M$ (where $M = [\beta_0,\beta_1,,...\beta_p,\epsilon_1,...,\epsilon_n ]$)
+  2. Under the constraint that $\sum_{j=1}^k \beta^2_j = 1$
+  3. So that $y_i(\beta_0+\beta_1x_{i1}+\beta_2x_{i2}+...+\beta_px_{ip}) \geq M(1-\epsilon_i)$ 
+  4. And $\epsilon_i \geq0,\sum_{i=1}^n \epsilon_i \leq C$
+
+Where $\epsilon$ are *slack* variables that are on the wrong side of the hyperplane.
+
+$C$ is the *tuning parameter* that is typically chosen by cross-validation. A higher $C$ allows for more slack variables, so it's more like a *tolerance* parameter -- it affects how much the hyperplane 'tolerates' misclassified points
+
+## Maximum Marginal Classifier (MMC)
+
+For a set of $k$ features, and a set of observation point $x_i$ is a vector of values for each of the $k$ features, with a group assignment $y_i$ taking on a value of -1 or +1:
+
+The maximum marginal classifier is the $k-1$ hyperplane that best separates the data, following the optimization algorithm:
+
+  1. Maximize the vector $M$ (where $M = [\beta_0,\beta_1,\beta_2,...\beta_p ]$)
+  2. Under the constraint that $\sum_{j=1}^k \beta^2_j = 1$
+  3. So that $y_i(\beta_0+\beta_1x_{i1}+\beta_2x_{i2}+...+\beta_px_{ip}) \geq M$ for each and every $n$
+
+This method assumes that it is possible to draw a hyperplane that will correctly separate every single point. In reality, there may be some overlap, for which the MMC is not very useful. Compare the optimization parameter in #3 to the linear equations in the [LM Tutorial](https://colauttilab.github.io/RIntroStats/3_LinearModels.html#Build-a-model).
+
+Let's plot two of our features to take a look
+
+```{r}
+qplot(x=Betaine,y=C2,colour=Class, data=SVDat)
+```
+
+There seems to be a lot of overlap in the data points. However, we are only looking at two features. There might be a higher-dimensional hyperplane that can separate these groups.
+
+The SVC is run with the `svm` function with the **linear** kernel. We also have to define a `Cost` parameter. The cost determines how much overlap we allow our points to have. A higher cost means that we penalize the model more for any points that overlap the hyperplane.
+
+```{r}
+Mod1<-svm(Class~., data=SVDat, kernel="linear",
+          cost=10,scale=F)
+summary(Mod1)
+```
+
+## Confusion Matrix
+
+As we saw in the [RDA Tutorial](https://colauttilab.github.io/RIntroML/3_RDA.html), we can compare the model's predictions to the observed classes of our response variable to generate a confusion matrix.
+
+```{r}
+CatDat<-data.frame(Obs=SVDat$Class,Pred=predict(Mod1))
+table(CatDat)
+```
+
+> Calculate the model accuracy
+
+Hint: This was covered in the [Advanced LM Tutorial](https://colauttilab.github.io/RIntroStats/4_AdvancedLM.html#Model_Accuracy)
+
+Let's try with a smaller cost parameter:
+
+```{r}
+Mod2<-svm(Class~.,data=SVDat,kernel="linear",cost=0.1,scale=F)
+CatDat2<-data.frame(Obs=SVDat$Class,Pred=predict(Mod2))
+table(CatDat2)
+```
+
+> Now try a higher cost like 100
+
+What cost should we use? We can use cross-validation, just like we did with the tuning parameters in the [RDA Tutorial](https://colauttilab.github.io/RIntroML/3_RDA.html).
+
+## Cross-validation
+
+The `tune` function from the `e1071` library controls the cross-validation models, similar to the `train` function in the RDA Tutorial. We can do a grid search by defining a range of cost values to test.
+
+```{r}
+set.seed(123)
+Mod3<-tune(svm,Class~.,data=SVDat,kernel="linear",
+           ranges=list(cost=10^c(-3:2)))
+```
+
+We can look at the performance of the models across different parameters of `cost`
+
+```{r}
+Mod3$performances
+```
+
+We look for the model with the lowest error, which is a cost value close to 0 in this case.
+
+# Train & Validate
+
+Now that we have had some practice doing cross-validation, we should also follow the best practice of dividing our data into a **training** set and a **validation** set. The latter is a subset of observations (rows) that we set aside during the model training process and then bring it back at the end to test how well the model performs on data it hasn't 'seen' before. The training set is the subset of data used to train the model. Note, however, that we can still use resampling and cross-validation algorithms to train the model using only the training set.
+
+A simple but effective way to split the dataset is to put all of the even-numbered rows in the training set and the odd-numbered rows in the validation set. An easy way to do this is with the remainder function `%%` which returns a `0` if there is no remainder and a `1` if there is a remainder. If we divide our row number by 2 then odd numbers will have a remainder and even numbers wont. We can use this to set two vectors -- odd and even -- that we can use to index our original dataset.
+
+```{r}
+Train<-c(1:nrow(SVDat)) %% 2
+Validate<-1-Train
+```
+
+# Support Vector Machine (SVM)
+
+Support vector machines are a non-linear version of support vector classifiers. Here the math is a bit more complicated to write out, but it is conceptually not too bad. Recall that each 'point' is defined by a vector $x_i$, so for example:
+
+  * A point on a line is defined by a vector of length 1
+  * A point on a plane is defined by a vector of length 2
+  * A point in a cube is defined by a vector of length 3
+  * A point in $k$-dimensional space is defined by a vector of length $k$
+
+The SVM compares the the inner-product of each pair of points. So for example, in the 2-d version with vector $x_1 = [0.2,0.8]$ and vector $x_2 = [0.3,0.5]$, the inner product is:
+
+```{r}
+v1<-c(0.2,0.8)
+v2<-c(0.3,0.5)
+v1*v2
+sum(v1*v2) ## <--- This is the inner product
+```
+
+What about for the same point?
+
+```{r}
+sum(c(0.2,0.2)*c(0.2,0.2))
+```
+
+If all of that sounds complicated, here is a very simple way to understand it well enough to run the model on your data:
+
+The difference between the SVC and SVM is the `kernel` parameter, which is linear for the SVC and nonlinear for the SVM. To fit an SVM we again use the `svm()` function we use the same code but with a nonlinear `kernel` parameter. We'll try the **sigmoid** kernel, which requires optimizing both the **cost** and a **gamma** tuning parameters, as shown in the equation in the `?svm` help:
+
+$$K(x_i,x_j) = tanh(\gamma x_i' x_j + \tau)$$
+
+To reduce the number of parameters to train, we can keep $\tau = 0$ (aka `coef0`) for a sigmoid kernel (see `?svm`). 
+
+```{r}
+set.seed(123)
+Mod4<-tune(svm,Class~.,data=SVDat,kernel="sigmoid",
+           ranges=list(cost=10^c(-3:2),gamma=c(0.5,1,2,3,4)))
+```
+
+We could print out the performances, but now we have to consider 2 different parameters. An easier way is to graph.
+
+```{r}
+PDat<-Mod4$performances
+qplot(x=cost,y=gamma,size=error,data=PDat) + scale_x_log10()
+```
+
+Remember that we want to minimize error, so the small dots are better models. In this case the best models are cost = 0.1 and gamma 0.5 or 1.
+
+# Level Up
+
+Now run the SVM model with the 'best' cost and gamma parameters.
+
+Then compare the predicted vs. observed to generate a confusion matrix. Calculate model accuracy, sensitivity and specificity.
+
+Try 'fine tuning' your parameters by choosing only values close to cost=0.1 and gamma=0.5
