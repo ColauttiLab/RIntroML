@@ -1,0 +1,331 @@
+---
+title: "Classification Trees"
+output: html_document
+---
+
+# Overview
+
+In the [RDA Tutorial](https://colauttilab.github.io/RIntroML/3_RDA.html) we looked at discriminant analysis, a form of classification. in the [SVM Tutorial](https://colauttilab.github.io/RIntroML/4_SVM.html) we looked at support vectors as another form of classification. 
+
+In this tutorial, we look at another class of classification models called **Decision Trees**. These trees represent another type of **supervised learning** because we try to predict a response variable ($Y$) from several features ($X_N$). The 'trees' get their name from the bifurcating structure, which resembles a trunk (root) and branching pattern with nodes connecting pairs of branches. 
+
+**Classification Trees** are decision trees that predict categorical responses while **Regression Trees** are decision trees that predict continuous responses. These are computationally very similar, and you will often seem them grouped under the acronym **CART** (Classification and Regression Tree).
+
+As with RDA and SVM, we can use cross validation to look at multiple models. However, the branching pattern of decision trees can change from one set of data to the next. This provides a challenge but also an opportunity to combine multiple (weak) models into a single, large (strong) model.
+
+## Ensemble Learning
+
+An **Ensemble** in machine learning, is a group of similar models. **Ensemble Learning** is a general term that refers to models that are built by combining other models, just as a different instruments in a musical ensemble contribute different sounds to make a more complex sound.
+
+Different decision tree models can be generated from the same dataset by cross-validation or random sampling of the input data. Models generated this way are called **Random Forest** models and these are among some of the most powerful models in Machine Learning!
+
+Once we have multiple models, we can combine them in different ways:
+
+  1. **Bagging** or **Boostrap Aggegating** -- Attempt to decrease the variance of prediction by averaging across the models. Often this will be a weighted average with more weight given to models that reduce more of the prediction variance.
+  2. **Boosting** -- Boosting builds on previous models, similar to fitting new models to the residuals of a linear mode. The focus is on trying to predict the observations that were misclassified or classified with low probability
+  3. **Stacking** -- Stacking is like a 'meta-model' that stacks on top of the other models to define how best to combine them.
+
+When we build separate models based on subsets of our data, we can do it **with replacement** or **without replacement**. We can subsample from the full set of features, but include all observations -- this is called **Random Subspaces** sampling. Or we can subsample both individual observations (rows) and feature subspaces (columns) -- this is called **Random Patches** sampling.
+
+A **Random Forest** is generally just an ensemble of many decision trees created with many options for subsampling and combining models. 
+
+# Setup
+
+Load the usual plotting and data management functions:
+
+```{r}
+library(ggplot2) # plotting library
+library(dplyr) # data management
+
+source("http://bit.ly/theme_pub") # Set custom plotting theme
+theme_set(theme_pub())
+```
+
+## Libraries
+
+```{r}
+library(tree) # Used to build classification and regression trees
+library(rpart) # Adds recursive partitioning for bootstrapping
+library(randomForest) # For random forests
+library(gbm) # For boosting
+```
+
+## Data
+
+For this tutorial, we'll work on the same data from *Lythrum salicaria* that we used in the [PCA Tutorial](https://colauttilab.github.io/RIntroML/2_PCA.html).
+
+```{r}
+LythrumDat<-read.csv("https://colauttilab.github.io/Data/ColauttiBarrett2013Data.csv",header=T)
+str(LythrumDat)
+```
+
+The important things to remember about the data:
+
+  1. Multiple traits were measured across 4 years, shown in the columns ending with numbers
+  2. PC1 generally corresponds to variation among 20 different genetic population, defined by the `Pop` column
+  3. PC2 generally corresponds to variation among 3 different growing conditions, defined by the `Site` column
+
+As with RDA and SVM, we should make sure that our categorical response variables are factors. 
+
+```{r}
+tDat<-LythrumDat %>%
+  mutate(Site=as.factor(Site),
+         Pop=as.factor(Pop))
+```
+
+Finally, we'll break this into two datasets. One to predict population and the other to predict garden site.
+
+```{r}
+popDat<-tDat %>% 
+  select(-c("Ind","Site","Row","Pos","Mat","Region"))
+siteDat<-tDat %>% 
+  select(-c("Ind","Row","Pos","Mat","Pop","Region"))
+```
+
+Looking back at the PC projection figures in that tutorial, we can imagine drawing vertical lines to separate genotypes along PC1 or horizontal lines to separate growing sites along PC2. This is the idea with decision trees -- find a threshold value that distinguishes the group(s) of interest.
+
+> Note: No need to transform/standardize the data!
+
+A really nice feature of CART analysis is that it makes very few assumptions about the underlying distribution of data. That makes for a very robust analysis. 
+
+# CART
+
+We can run a CART analysis to try to predict which site a plant comes from based on its phenotype:
+
+## Model fitting
+
+```{r}
+PopTree <- tree(Pop ~ ., data=popDat)
+PopTree
+```
+
+Note that the default output for PopTree is only part of the object, which you can see if you type `str(PopTree)`.
+
+The output above shows the structure of the bifurcating tree from the CART analysis. It's a bit hard to understand the structure, but luckily we can use the basic `plot` function in base R to visualize it and the `text` function to add labels.
+
+```{r}
+plot(PopTree)
+text(PopTree, cex=0.7)
+```
+
+Use `?text` to see what the `cex` parameter does and some other options for formatting.
+
+It's no ggplot now we can compare this to the figure to the output table to identify the nodes, starting with the root (top; FVeg07) then moving down to 1 (HVeg10) and 2 (InfMass).
+
+The bottom of the tree shows the predicted population (A-J). These are called the **tips** of the tree.
+
+We can also see that the lengths of the **branches** differ along the y-axis. The lengths represent the number of observations, so longer branches represent stronger predictions that classify more of the observations. In this case, the node branch for FVeg07 distinguishes most of the northern populations (A, C, E) from the southern ones (J, S, T).
+
+## Performance
+
+We can use the `summary` function to summarize the model and how well it performs
+
+```{r}
+summary(PopTree)
+```
+
+The top rows show the model structure. The last two rows show the performance of the model. 
+
+## Confusion matrix
+
+As with other ML models, we can look at the confusion matrix to test model performance. 
+
+```{r}
+CatDat<-data.frame(Obs=popDat$Pop,Pred=predict(PopTree, popDat, type="class"))
+table(CatDat)
+```
+
+One interesting thing to note in this confusion matrix is that the populations are sorted alphabetically, which also corresponds to latitiude of origin from the north to the south. We might therefore expect that adjacent populations would be more similar to each other (e.g. A vs C or E vs J) whereas more distant populations would be more different (e.g. A vs T). The data seem to support that hypothesis.
+
+## Model Accuracy
+
+Note that we have 6 categories instead of the usual 2. Because we have multiple categories we don't have true positives and true negatives (2 categories). Instead we have correct classifications along the diagonal and the misclassification error represented by the off-diagonal. 
+
+## Classification rate
+
+Correct classifications are simply where the prediction matches the observation, shown along the diagonal. We can calculate the correct **classification rate** if we divide by the total.
+
+```{r}
+Correct<-CatDat %>%
+  filter(Obs==Pred)
+nrow(Correct)/nrow(CatDat)
+```
+
+To calculate the misclassification rate, we can just subtract the above value from 1 or from the data itself.
+
+```{r}
+MisClass<-CatDat %>%
+  filter(Obs!=Pred)
+nrow(MisClass)/nrow(CatDat)
+```
+
+> Why is this so much higher than the summary?
+
+Note the sample size in the summary, compared to the full dataset
+
+```{r}
+nrow(popDat)
+```
+
+The difference seems to be that the model performs poorly for rows with missing data. A lot of the missing values are from plants that didn't reproduce or died before being measured. If we are confident that these should be 0 rather than NA, then we can replace the values in the dataset and re-run the analysis. We'll use a quick shortcut to replace all of the `NA` with 0
+
+```{r}
+popDat[is.na(popDat)]<-0
+PopTree <- tree(Pop ~ ., data=popDat)
+plot(PopTree)
+text(PopTree, cex=0.7)
+summary(PopTree)
+```
+
+We see a different tree structure and the correct sample size, but not really any improvement in the misclassification rate.
+
+# Cross-validation and pruning
+
+We can use **k-fold cross-validation** with CART to see how the structure of the tree changes depending on the input data. If we compare multiple trees grown from different datasets we may find that some nodes are consistently good at prediction but others are unstable -- they only work well for a few particular datasets. We can then remove or 'prune' those unstable branches to build a tree that is more robust and less prone to overfitting. 
+
+There is a simple function in the `tree` package that does all of this at once.
+
+```{r, warning=F}
+PopPrune<-cv.tree(PopTree, k=24, FUN=prune)
+plot(PopPrune)
+text(PopPrune, cex=0.7)
+```
+
+Note that there are a few pruning options available that use different algorithms. You can learn more from the help functions:
+
+`?prune`
+`?prune.misclass`
+`?prune.rpart`
+`?prune.tree`
+
+
+## CV Error Rate
+
+For comparison with the unpruned tree, we can again look at the confusion matrix and misclassification rates of our CV (pruned) tree
+
+```{r}
+CatDat2<-data.frame(Obs=popDat$Pop,Pred=predict(PopPrune, popDat, type="class"))
+table(CatDat2)
+```
+
+```{r}
+MisClass<-CatDat2 %>%
+  filter(Obs!=Pred)
+nrow(MisClass)/nrow(CatDat2)
+```
+
+Note that the misclassification rate is actually LOWER than the original tree, even though it has fewer branches.
+
+# Random Forests
+
+Random forests offer more powerful predictions but at the cost of interpretability.
+
+In R we can use the `randomForests` function from the library of the same name. 
+
+Remember that a Random Forest Model is an ensemble model built by combining many individual decision trees. 
+
+```{r}
+set.seed(123)
+PopFor<-randomForest(Pop ~ ., data=popDat, 
+                           ntree=100, mtry=3, nodesize=5, importance=TRUE)
+```
+
+There are a lot of parameters in the `?randomForests` help. Here are a few
+
+  * `ntree` - the number of trees. The default is 500 which is maybe a bit too high for our small dataset.
+  * `mtry` - number of features to include in each subtree. We use 3 since we have few features
+  * `replace` - sample, with replacement (default=T)
+  * `nodesize` - the minimum number of nodes. Since we have 6 populations, we need at least 5 nodes to distinguish them.
+  * `importance` - this helps us understand which features are important, given that model is a black box
+
+Let's take a look at the output
+
+```{r}
+PopFor
+```
+
+Here we see the class-specific error rates, calculated across rows, as well as the overall error rate calculated from the confusion matrix as we did above.
+
+We can also get an idea of how each trait predicts each group
+
+```{r}
+PopFor$importance
+```
+
+The columns A-T show how the accuracy of the model for that particular group is affected by removing each feature. These are averaged in the `MeanDecreaseAccuracy` column. The higher the number, the more the accuracy of the model is impacted by this feature. We can look at the individual population columns to see how different features might be important for some populations more than others.
+
+
+# Boosting
+ 
+The above example uses `bagging` of the number of trees defined by `ntree`. Bagging just means that we aggregate the results of all of the different models equally. 
+
+Rather than simply averaging the models, we can impose different structures that affect how each subsampled tree contributes to the whole prediction. This kind of model building is called `boosting`, which can be implemented with the `gbm` function in R from the library of the same name.
+
+Three of the more common/popular boosting methods are:
+
+  1. **AdaBoost** -- or Adaptive Boosting, weights models. See this [YouTube Explanation from StatQuest](https://www.youtube.com/watch?v=LsK-xG1cLYA) or the more technical [Wikipedia Explanation](https://en.wikipedia.org/wiki/AdaBoost#:~:text=AdaBoost%2C%20short%20for%20Adaptive%20Boosting,G%C3%B6del%20Prize%20for%20their%20work.&text=AdaBoost%20is%20adaptive%20in%20the,instances%20misclassified%20by%20previous%20classifiers.)
+  2. **Gradient Boost** -- is similar to AdaBoost except that downstream trees are fit to the residuals of upstream trees.
+ 
+This opens up a lot of possibilities for 
+ 
+```{r}
+set.seed(123)
+PopBoost<-gbm(Pop ~ ., data=popDat,
+              distribution="tdist",
+              n.trees = 100, interaction.depth=2, cv.folds=12)
+PopBoost
+```
+
+  * `distribution` refers to the response variable, which is categorical, not Gaussian, but we can treat it as Gaussi 
+
+```{r}
+summary(PopBoost)
+```
+
+The relative influence here shows how important each feature is to the accuracy of the model, ranked from highest to lowest.
+
+```{r}
+CatDat3<-data.frame(Obs=popDat$Pop,Pred=predict(PopBoost, popDat, type="response"))
+head(CatDat3)
+```
+
+Notice that the predictions are fractional rather than categorical. The numbers represent the different categories numerically, which we can see with `as.numeric`
+
+```{r}
+unique(CatDat3$Obs)
+unique(as.numeric(CatDat3$Obs))
+```
+
+We can plot these to compare the observed across predicted categories
+
+```{r}
+CatDat3$ObsNum<-as.numeric(CatDat3$Obs)
+qplot(Pred,ObsNum, data=CatDat3, alpha=I(0.3))
+```
+
+Or we can `round` our predictions to find the closest category so that we can calculate our confusion matrix and misclassification rate.
+
+```{r}
+CatDat4<-data.frame(Obs=CatDat3$ObsNum,Pred=round(CatDat3$Pred,0))
+table(CatDat4)
+MisClass<-CatDat4 %>%
+  filter(Obs!=Pred)
+nrow(MisClass)/nrow(CatDat4)
+```
+
+All that extra work, but not much improvement in the model.
+
+
+# Level Up
+
+Now try running a similar analysis on the same data to look at predictions for `Site` and `Region`. 
+
+Then, try making a new variable by pasting the Site & Rgion to define a new column, and run the models on that column. 
+
+What phenotypes are most different among sites vs regions? How well can you predict the site and region based on its phenotype?
+
+Try re-running one or more of the Decision Tree models on the two main PC axes rather than the features themselves.
+
+See if you can improve the models by changing some of the pruning and cross-validation parameters.
+
+
